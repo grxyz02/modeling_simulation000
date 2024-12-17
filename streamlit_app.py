@@ -8,7 +8,7 @@ LOGGER = get_logger(__name__)
 
 def run():
     st.set_page_config(
-        page_title="ML Generator and Implementation,
+        page_title="ML_Generator_and_Implementation",
         page_icon="🤖",
     )
 
