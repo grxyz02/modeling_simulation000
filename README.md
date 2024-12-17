@@ -1,4 +1,4 @@
-# 🎈 Blank app template
+# 🚀​ML Data Generator
 
 A simple Streamlit app template for you to modify!
 
