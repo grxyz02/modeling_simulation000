@@ -2,102 +2,141 @@ import streamlit as st
 import plotly.express as px
 import numpy as np
 import pandas as pd
-import io
-from sklearn.preprocessing import MinMaxScaler
+import joblib
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.metrics import classification_report
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-import joblib
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
+from plotly.figure_factory import create_annotated_heatmap
 
-
-# Title Section
+# -------------------------
+# Title and Sidebar Section
+# -------------------------
 st.title("ML Model Generator")
+st.info("Generate synthetic data or upload a dataset to train and evaluate ML models.")
 
-# Sidebar Section
+# Sidebar
 with st.sidebar:
-    # Data Source Section
     st.header("Data Source")
     data_source = st.radio("Choose data source:", ["Generate Synthetic Data", "Upload Dataset"])
 
+    # Synthetic Data Settings
     if data_source == "Generate Synthetic Data":
-        st.subheader("Synthetic Data Generation")
-        st.write("Define parameters for synthetic data generation below.")
-        
-        # Data Generation Parameters Section
         st.subheader("Data Generation Parameters")
-        
-        # Input for feature names
+
+        # Input for feature and class names
         features_input = st.text_input("Enter feature names (comma-separated)", "length (mm), width (mm), density (g/cm³)")
         features = [f.strip() for f in features_input.split(",")]
 
-        
-        # Input for class names
         classes_input = st.text_input("Enter class names (comma-separated)", "Ampalaya, Banana, Cabbage")
         classes = [c.strip() for c in classes_input.split(",")]
 
-        # Class-Specific Settings
-        st.subheader("Class-Specific Settings")
-        class_data = []  # List to store data for all classes
-
-        # Store mean and std values for each class
+        # Class-specific settings
         mean_values_dict = {}
         std_values_dict = {}
-
         for class_name in classes:
-            with st.expander(f"{class_name} Settings", expanded=False):
-                st.checkbox(f"Set specific values for {class_name}", value=True)
-
+            with st.expander(f"{class_name} Settings"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    mean_values_dict[class_name] = [
-                        int(st.number_input(f"Mean for {feature} ({class_name})", value=100.0)) for feature in features
-                    ]
+                    mean_values_dict[class_name] = [int(st.number_input(f"Mean for {f} ({class_name})", value=100)) for f in features]
                 with col2:
-                    std_values_dict[class_name] = [
-                        int(st.number_input(f"Std Dev for {feature} ({class_name})", value=10.0)) for feature in features
-                    ]
+                    std_values_dict[class_name] = [int(st.number_input(f"Std Dev for {f} ({class_name})", value=10)) for f in features]
 
-        st.subheader("Sample Size & Train/Test Split Configuration")   
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            total_sample_size = st.slider(
-                "Number of samples", 
-                max_value = 50000, 
-                min_value=500,
-                step=500
-            )
-        with col2:
-            train_test_split_percent = st.slider(
-                "Train-Test Split (%)",
-                min_value=10,
-                max_value=50,
-                step=5
-            )
+        # Sample size and split
+        st.subheader("Sample Size & Train/Test Split")
+        # Number of Samples Slider
+        total_sample_size = st.sidebar.slider(
+            "Number of samples", 
+            min_value=500, 
+            max_value=50000, 
+            value=10000, 
+            step=500
+        )
 
+        # Test Size Slider with Tooltip
+        train_test_split_percent = st.sidebar.slider(
+            "Test Size", 
+            min_value=10, 
+            max_value=50, 
+            value=30, 
+            step=5,
+            help="Percentage of data to use for testing"
+        )
+
+        # Calculate Train Size
+        train_size = 100 - train_test_split_percent
+
+        # Display Split Ratio
+        st.sidebar.write(f"**Test: {train_test_split_percent}% / Train: {train_size}%**")
+
+        # Button to Generate Data
+        generate_data_button = st.sidebar.button("Generate Data and Train Models")
+    
+    # CSV Upload Settings
+    elif data_source == "Upload Dataset":
+        st.subheader("Upload Dataset")
+        uploaded_file = st.file_uploader("Upload CSV File",
+        type=["csv"],
+        help="Upload a CSV file with features and target column")
+
+        if uploaded_file:
+            df = pd.read_csv(uploaded_file)
+            st.success("File uploaded successfully!")
+            st.subheader("Sample Data Preview")
+            st.dataframe(df.head())
+
+            target_column = st.selectbox("Select Target Column", df.columns)
+            features = [col for col in df.columns if col != target_column]
+            train_test_split_percent = st.slider("Train-Test Split (%)", min_value=10, max_value=90, step=5)
+            upload_data_button = st.button("Train Model")
+
+# -------------------------
+# Main Section - Data Handling and Model Training
+# -------------------------
+X, y = None, None  # Initialize X and y to ensure they are not undefined
+
+# Synthetic Data Section
+if "generate_data_button" in locals() and generate_data_button:
+    try:
+        # Generate synthetic data
         samples_per_class = total_sample_size // len(classes)
-        
-        # Generate synthetic data for each class
+        class_data = []
         for class_name in classes:
-            mean_values = mean_values_dict[class_name]
-            std_values = std_values_dict[class_name]
             data = np.random.normal(
-                loc=mean_values,
-                scale=std_values,
+                loc=mean_values_dict[class_name],
+                scale=std_values_dict[class_name],
                 size=(samples_per_class, len(features))
             )
-            class_labels = np.full((samples_per_class, 1), class_name)  # Class label column
-            class_data.append(np.hstack([data, class_labels]))  # Combine data and labels
+            labels = np.full((samples_per_class, 1), class_name)
+            class_data.append(np.hstack([data, labels]))
 
-    generate_data_button = st.button("Generate Data and Train Model")
+        all_data = np.vstack(class_data)
+        np.random.shuffle(all_data)
 
-# Main Section - Output Area
-if generate_data_button or 'generated' not in st.session_state:
+        # Create DataFrame
+        X = pd.DataFrame(all_data[:, :-1], columns=features)
+        y = all_data[:, -1]
+        st.success("Synthetic data generated successfully!")
+
+    except Exception as e:
+        st.error(f"Error in data generation: {e}")
+
+# Uploaded Data Section
+if "upload_data_button" in locals() and upload_data_button:
+    try:
+        # Prepare uploaded dataset
+        X = df[features]
+        y = df[target_column]
+        st.success("Dataset prepared successfully!")
+
+    except Exception as e:
+        st.error(f"Error processing uploaded data: {e}")
+
+# Validate if X and y are properly set before proceeding to Model Training
+if X is not None and y is not None:
     try:
         all_data = np.vstack(class_data)
         np.random.shuffle(all_data)
@@ -357,7 +396,7 @@ if generate_data_button or 'generated' not in st.session_state:
             )
 
 
-    except ValueError as e:
-        st.error(f"Error: {e}")
     except Exception as e:
-        st.error(f"Unexpected error: {e}")
+        st.error(f"An error occurred during model training or evaluation: {e}")
+else:
+    st.error("Data not found! Please ensure that synthetic data is generated or a dataset is uploaded.")

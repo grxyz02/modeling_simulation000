@@ -15,7 +15,7 @@ def run():
 
 
     st.sidebar.success("Navigate above!")
-    st.write("Please generate data using the sidebar button to view visualizations and results.")
+    
 
 
 if __name__ == "__main__":
